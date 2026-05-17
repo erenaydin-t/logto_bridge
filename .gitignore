@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -216,3 +217,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+=======
+__pycache__/
+*.pyc
+*.egg-info/
+.eggs/
+build/
+dist/
+node_modules/
+.DS_Store
+>>>>>>> d203810 (Add init)

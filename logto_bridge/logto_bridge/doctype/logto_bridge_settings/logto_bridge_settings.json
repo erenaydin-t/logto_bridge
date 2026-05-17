@@ -1,0 +1,113 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-05-14 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "logto_section",
+  "logto_endpoint",
+  "audience",
+  "endpoints_column",
+  "jwks_uri",
+  "userinfo_uri",
+  "provisioning_section",
+  "auto_create_user",
+  "default_role"
+ ],
+ "fields": [
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled",
+   "description": "When unchecked, the Logto auth hook is skipped entirely."
+  },
+  {
+   "fieldname": "logto_section",
+   "fieldtype": "Section Break",
+   "label": "Logto Tenant"
+  },
+  {
+   "fieldname": "logto_endpoint",
+   "fieldtype": "Data",
+   "label": "Logto Endpoint",
+   "options": "URL",
+   "reqd": 1,
+   "description": "Logto tenant base URL, no trailing slash. Issuer is derived as <endpoint>/oidc."
+  },
+  {
+   "fieldname": "audience",
+   "fieldtype": "Data",
+   "label": "Audience (API Resource Indicator)",
+   "reqd": 1,
+   "description": "The ERPNext API resource indicator registered in Logto. The token 'aud' claim must match this exactly. Each consumer app may register its OWN audience; this is the audience THIS site accepts."
+  },
+  {
+   "fieldname": "endpoints_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "jwks_uri",
+   "fieldtype": "Data",
+   "label": "JWKS URI",
+   "options": "URL",
+   "description": "Optional override. Defaults to <endpoint>/oidc/jwks."
+  },
+  {
+   "fieldname": "userinfo_uri",
+   "fieldtype": "Data",
+   "label": "Userinfo URI",
+   "options": "URL",
+   "description": "Optional override. Defaults to <endpoint>/oidc/me (Logto's standard path)."
+  },
+  {
+   "fieldname": "provisioning_section",
+   "fieldtype": "Section Break",
+   "label": "User Provisioning",
+   "description": "Logto access tokens carry only `sub` (per OIDC). Users are linked to Logto via `User.username = \"logto:<sub>\"`. On first sign-in for an unknown sub, the bridge calls /userinfo once to get email + name, then either links an existing User (by email) or provisions a new one."
+  },
+  {
+   "default": "0",
+   "fieldname": "auto_create_user",
+   "fieldtype": "Check",
+   "label": "Auto Create User",
+   "description": "Provision an ERPNext User on first sign-in when no account matches the token's sub OR the email returned by /userinfo."
+  },
+  {
+   "default": "Sales User",
+   "depends_on": "auto_create_user",
+   "fieldname": "default_role",
+   "fieldtype": "Link",
+   "label": "Default Role",
+   "options": "Role",
+   "description": "Role granted to auto-provisioned users."
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-05-16 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Logto Bridge",
+ "name": "Logto Bridge Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

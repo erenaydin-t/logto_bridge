@@ -1,0 +1,19 @@
+[project]
+name = "logto_bridge"
+description = "Logto SSO (OIDC) authentication bridge for the Visitor Sales PWA on ERPNext 16"
+authors = [{ name = "Milan Pars" }]
+requires-python = ">=3.10"
+readme = "README.md"
+dynamic = ["version"]
+dependencies = [
+    # JWT verification against the Logto tenant JWKS.
+    # [crypto] pulls in the `cryptography` backend needed for RS256/ES384.
+    "pyjwt[crypto]>=2.8.0",
+]
+
+[build-system]
+requires = ["flit_core >=3.4,<4"]
+build-backend = "flit_core.buildapi"
+
+[tool.bench.frappe-dependencies]
+frappe = ">=15.0.0,<17.0.0"
