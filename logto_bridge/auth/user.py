@@ -2,19 +2,22 @@
 
 User-resolution model
 ---------------------
-Logto access tokens are intentionally minimal (per OIDC) — they carry
-`sub`/`aud`/`exp`/`iss` but NOT `email` or profile claims. Those live in
-the ID token and behind `/userinfo`. We therefore:
+Identity is resolved automatically from the verified access-token claims —
+no manual `logto:<sub>` mapping is ever required. The flow is:
 
-  1. Look up `User.username == "logto:<sub>"`.
-  2. If found, return it. Zero network overhead.
-  3. If not found, call Logto's `/userinfo` ONCE with the access token to
-     get `email` + `name`. Then either link an existing User (matched by
-     email) by setting its `username = "logto:<sub>"`, or auto-provision
-     a new one when `auto_create_user` is on.
+  1. Look up `User.username == "logto:<sub>"`. If found, return it. This is
+     the fast path for every returning user — zero network overhead.
+  2. First sign-in for a new sub: read `email` (and `name`) DIRECTLY from the
+     verified JWT claims. Logto is configured to emit these as custom JWT
+     claims on the access token, so no second round-trip is needed.
+  3. Match an existing ERPNext User by that email and link it by setting
+     `username = "logto:<sub>"`. The user keeps all of its native ERPNext
+     roles and permissions — Logto only authenticates, ERPNext authorises.
+  4. If no User matches and `auto_create_user` is on, provision a new one.
 
-Step 3 only runs on the first request from a new sub — every subsequent
-request is a pure local DB lookup.
+A resource-scoped access token (`aud = <ERPNext resource>`) is NOT valid at
+Logto's `/oidc/me` endpoint, so userinfo is only attempted as a last-resort
+fallback when the claims carry no email — it is not on the happy path.
 
 ORM-only — no raw SQL anywhere in this module.
 """
@@ -45,28 +48,33 @@ def resolve_user(claims: dict, settings: dict, *, access_token: str) -> str:
     # Step 1: existing linked User — the common case after first sign-in.
     user_name = frappe.db.get_value("User", {"username": logto_username}, "name")
     if user_name:
-        if not frappe.db.get_value("User", user_name, "enabled"):
-            frappe.throw(_("This user account is disabled."), frappe.AuthenticationError)
+        _ensure_enabled(user_name)
         return user_name
 
-    # Step 2: not linked yet — enrich from userinfo.
-    userinfo = _fetch_userinfo(settings["userinfo_uri"], access_token)
-    email = (userinfo.get("email") or "").strip().lower()
-    name = (userinfo.get("name") or "").strip()
+    # Step 2: first sign-in for this sub. Read identity straight from the
+    # verified claims. Only when the access token carries no email do we fall
+    # back to /userinfo (which a resource-scoped token cannot satisfy).
+    email = _claim_email(claims)
+    name = _claim_name(claims)
 
     if not email:
-        # Without an email we cannot create a valid User. Tell the admin
-        # which sub to link manually so they can create the User in the
-        # ERPNext UI and rerun.
+        userinfo = _fetch_userinfo(settings["userinfo_uri"], access_token)
+        email = (userinfo.get("email") or "").strip().lower()
+        name = name or (userinfo.get("name") or "").strip()
+
+    if not email:
+        # Without an email we cannot resolve or create a User. This means the
+        # access token is missing its email claim — point the admin at the
+        # Logto custom-JWT configuration rather than a per-user manual mapping.
         frappe.log_error(
-            message=f"Userinfo for sub={sub} returned no email; claims={userinfo}",
-            title="Logto userinfo missing email",
+            message=f"No email claim on token or userinfo for sub={sub}",
+            title="Logto token missing email claim",
         )
         frappe.throw(
             _(
-                "Logto did not return an email for this user. "
-                "Create an ERPNext User and set its username to 'logto:{0}'."
-            ).format(sub),
+                "Logto did not provide an email for this user. Add an 'email' "
+                "custom JWT claim to the ERPNext API resource in Logto."
+            ),
             frappe.AuthenticationError,
         )
 
@@ -76,13 +84,11 @@ def resolve_user(claims: dict, settings: dict, *, access_token: str) -> str:
             frappe.AuthenticationError,
         )
 
-    # Step 3: existing User with that email — link it to this sub for next time.
+    # Step 3: existing User with that email — link it to this sub for next
+    # time. The User keeps its native ERPNext roles and permissions untouched.
     user_name = frappe.db.get_value("User", {"email": email}, "name")
     if user_name:
-        if not frappe.db.get_value("User", user_name, "enabled"):
-            frappe.throw(
-                _("This user account is disabled."), frappe.AuthenticationError
-            )
+        _ensure_enabled(user_name)
         frappe.db.set_value("User", user_name, "username", logto_username)
         frappe.db.commit()
         return user_name
@@ -100,6 +106,27 @@ def resolve_user(claims: dict, settings: dict, *, access_token: str) -> str:
         logto_username=logto_username,
         settings=settings,
     )
+
+
+def _ensure_enabled(user_name: str) -> None:
+    """Reject sign-in for a disabled ERPNext User."""
+    if not frappe.db.get_value("User", user_name, "enabled"):
+        frappe.throw(_("This user account is disabled."), frappe.AuthenticationError)
+
+
+def _claim_email(claims: dict) -> str:
+    """Return the normalised email from the verified token claims, if present."""
+    raw = claims.get("email")
+    return raw.strip().lower() if isinstance(raw, str) else ""
+
+
+def _claim_name(claims: dict) -> str:
+    """Best-effort display name from common OIDC/profile claim keys."""
+    for key in ("name", "preferred_username", "username"):
+        value = claims.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
 
 
 def _fetch_userinfo(userinfo_uri: str, access_token: str) -> dict:
