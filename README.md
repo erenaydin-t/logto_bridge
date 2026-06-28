@@ -13,14 +13,29 @@ statelessly, with no session cookie**.
 1. `auth_hooks` registers `logto_bridge.auth.validate.validate_auth`, which runs
    on every incoming request.
 2. If an `Authorization: Bearer` header is present and the bridge is enabled,
-   the JWT is verified against the Logto tenant **JWKS** (signature, `iss`,
-   `aud`, `exp`, `iat`, required claims).
-3. The verified `email` claim is mapped to a Frappe `User` via the ORM. With
+   the token is validated by one of two paths depending on its shape:
+   - **JWT access token** (the client requested the ERPNext API resource):
+     verified locally against the Logto tenant **JWKS** (signature, `iss`,
+     `aud`, `exp`, `iat`, required claims).
+   - **Opaque access token** (the client signed in with plain OIDC scopes and
+     never requested the resource — e.g. the Raven mobile app): validated at
+     Logto's userinfo endpoint (`/oidc/me`), which returns the token owner's
+     claims only for a live, unexpired token. The result is cached briefly
+     (keyed by a hash of the token) so polling clients don't hit Logto on every
+     request.
+3. The resulting `email` claim is mapped to a Frappe `User` via the ORM. With
    *Auto Create User* enabled, an unknown user is provisioned with the
    configured default role.
 4. `frappe.set_user()` sets the user for that request only. No
    `login_manager.login()`, so no session cookie is issued — which also keeps
    these endpoints free of CSRF-token requirements.
+
+> **Preferred:** issue **JWT** access tokens by granting the client app the
+> ERPNext API resource in Logto *and* having the client request it
+> (`resources: ['<audience>']`). The opaque-token path is a compatibility
+> fallback for clients that cannot request a resource; it relies on Logto to
+> vouch for the token via userinfo rather than an `aud`-pinned local signature
+> check.
 
 ## Security properties
 
@@ -28,6 +43,10 @@ statelessly, with no session cookie**.
   (`frappe.db.get_value`, `frappe.db.exists`, `frappe.new_doc`).
 - **Full JWT validation.** Signature via JWKS, plus `iss` / `aud` / `exp` /
   `iat` and a `require` list — no `verify=False` shortcuts.
+- **Opaque tokens validated by Logto.** A non-JWT token is never decoded
+  locally; it is accepted only if Logto's userinfo endpoint returns `200` with
+  a `sub`. This path does not assert `aud` (an opaque token carries none), so
+  prefer resource-scoped JWTs where the client can request them.
 - **Stateless.** Bearer-only; no cookie session, no CSRF surface.
 - **Rate limited.** Whitelisted endpoints carry `@rate_limit` decorators.
 - **Fail closed.** Any verification error raises `frappe.AuthenticationError`;
