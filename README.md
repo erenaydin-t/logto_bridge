@@ -49,8 +49,13 @@ statelessly, with no session cookie**.
   prefer resource-scoped JWTs where the client can request them.
 - **Stateless.** Bearer-only; no cookie session, no CSRF surface.
 - **Rate limited.** Whitelisted endpoints carry `@rate_limit` decorators.
-- **Fail closed.** Any verification error raises `frappe.AuthenticationError`;
-  a missing header is a silent no-op so native API-key auth still works.
+- **Fail closed for Logto tokens.** A Logto-token verification error raises
+  `frappe.AuthenticationError`; a missing header is a silent no-op.
+- **Defers non-Logto bearer tokens.** This hook runs after Frappe's native
+  bearer auth. If the request is already authenticated, or the token is a
+  Frappe-issued OAuth2 bearer token (e.g. the **Raven mobile app**, which uses
+  `frappe.integrations.oauth2`), the bridge no-ops and lets Frappe's native
+  auth handle it — it does not hijack or reject non-Logto tokens.
 
 ## Install
 

@@ -19,20 +19,26 @@ def validate_auth() -> None:
 
     Runs on every request via `auth_hooks`. Behaviour:
 
-    * No ``Authorization: Bearer`` header  -> no-op (cookie / API-key auth
+    * No ``Authorization: Bearer`` header   -> no-op (cookie / API-key auth
       still applies).
-    * JWT access token (resource-scoped)    -> verify the signature against the
-      Logto JWKS and set the request user.
-    * Opaque access token (no resource)     -> validate it at Logto's userinfo
-      endpoint and set the request user.
-    * Verification failure                 -> ``frappe.AuthenticationError``
+    * Bearer token already accepted by Frappe's native auth, or a Frappe-issued
+      OAuth2 token                           -> no-op (defer to native auth).
+    * Logto JWT access token (resource-scoped) -> verify the signature against
+      the Logto JWKS and set the request user.
+    * Logto opaque access token (no resource)  -> validate it at Logto's
+      userinfo endpoint and set the request user.
+    * Logto verification failure            -> ``frappe.AuthenticationError``
       (fail closed).
 
-    Logto only mints a *JWT* access token when the client requests the ERPNext
-    API resource; a client that does not (e.g. the Raven mobile app) gets an
-    *opaque* token instead. Both are accepted here — a JWT is verified locally
-    against the JWKS, an opaque token is validated via ``/oidc/me`` — so the
-    bridge no longer rejects opaque tokens with ``Not enough segments``.
+    This hook runs AFTER Frappe's native bearer-token auth
+    (``frappe.auth.validate_auth`` -> ``validate_oauth`` ->
+    ``validate_auth_via_hooks``). Not every ``Bearer`` token is a Logto token:
+    the **Raven mobile app** signs in with Frappe's own OAuth2
+    (``frappe.integrations.oauth2``) and sends an opaque *Frappe* OAuth2 bearer
+    token, which Frappe validates natively. The two guards below keep this hook
+    from hijacking such a token and failing it closed (which previously surfaced
+    as ``Invalid Logto token: Not enough segments``). Genuine Logto tokens —
+    used by the Visitor Sales PWA — still flow through to validation.
 
     The user is set for THIS request only — `frappe.set_user` rather than
     `login_manager.login()` — so no session cookie is issued and the endpoint
@@ -49,6 +55,17 @@ def validate_auth() -> None:
     if not settings["endpoint"] or not settings["audience"]:
         # Misconfigured bridge: log it, and do not silently authenticate.
         frappe.log_error(title="Logto bridge is enabled but not fully configured")
+        return
+
+    # Guard 1: Frappe's native auth (OAuth2 bearer / API key) runs before this
+    # hook. If it already resolved a real user, this is not ours to second-guess.
+    if frappe.session.user and frappe.session.user != "Guest":
+        return
+
+    # Guard 2: a token that exists in Frappe's OAuth2 store is a Frappe-issued
+    # bearer token (the Raven mobile app's), not a Logto token — even if expired
+    # or revoked. Defer to native auth rather than mis-validating it as Logto.
+    if frappe.db.exists("OAuth Bearer Token", {"access_token": token}):
         return
 
     if _looks_like_jwt(token):
